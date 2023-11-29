@@ -24,7 +24,9 @@
 ///                               Настройка
 /////////////////////////////////////////////////////////////////////////////////
 
+//#define KOL_LED       50         // Сколько светодиодов в гирлянде при первом включении
 #define KOL_LED       100         // Сколько светодиодов в гирлянде при первом включении
+#define KOL_LED_50     50         // Сколько светодиодов в гирлянде при первом включении
 
 //////////////////////////////////////// Параметры пульта
 ////
@@ -39,6 +41,10 @@
                                   // или равно KOL_LED
                                   // От размера этого числа зависит колличество используемой памяти  
  
+ 
+#define PIN_LED_NUM_SWITCH 3      // Номер пина переключателя размера ленты
+#define PIN_DEMO_MODE_SWITCH 4    // Номер пина переключателя режима демо
+
  //Тип пульта на который будет реагировать устройство, ставим 1 у того который используется
  //это уменьшит используемую память 
  //Чтобы узнать имя пульта запустите в примерах IRremote / IRrecvDump
@@ -87,10 +93,13 @@
 
 //////////////////////////////////////// Параметры гирлянды
 ////
-#define COLOR_ORDER   GRB         //Очередность цвета светодиодов  RGB или GRB
-#define CHIPSET       WS2812B     //Тип микросхемы светодиодов в гирлянде
+//#define COLOR_ORDER   GRB         //Очередность цвета светодиодов  RGB или GRB
+#define COLOR_ORDER   RGB         //Очередность цвета светодиодов  RGB или GRB
+//#define CHIPSET       WS2812B     //Тип микросхемы светодиодов в гирлянде
+#define CHIPSET       WS2811     //Тип микросхемы светодиодов в гирлянде
 
-#define LED_DT        14          // Номер пина куда подключена гирлянда
+//#define LED_DT        14          // Номер пина куда подключена гирлянда
+#define LED_DT        2          // Номер пина куда подключена гирлянда
 //#define LED_CK        11          // Номер пина для подключения тактов, применяется для светодиодов WS2801 или APA102
                                   //ЕСЛИ НЕ ИСПОЛЬЗУЕТСЯ ЗАКОМЕНТИРОВАТЬ
 
@@ -104,17 +113,18 @@
 
 #define GLITER_ON     1           // Включить блеск 0 - блеск отключен, 1- блеск включен
 
-#define CANDLE_KOL    20           // если больше 0 то будут включена эмитация свечей
+#define CANDLE_KOL    20          // если больше 0 то будут включена имитация свечей
                                   // число задает через какое расстояние друг от друга располагать свечи
-#define CANDLE_ON     0           // Если включена эмитация свечей то 1 = при запуске она будет включена
+#define CANDLE_ON     0           // Если включена имитация свечей то 1 = при запуске она будет включена
                                   //                                  0 = при запуске она будет выключена
 
 #define CANDLE_40     1           // Управление 40 эффектом (свечи)   1 = при запуске она будет включена по варианту efimova1969
                                   //                                  иначе при запуске она будет включена по моему варианту 
 
-#define BACKGR_ON     1           // Включить заполнение черного цвета фоном
+#define BACKGR_ON     2           // Включить заполнение черного цвета фоном 1 - синий фон, 2 - зеленый, 3 - красный
 
-#define DEMO_MODE     1           // Режим при включении 
+#define DEMO_MODE     1           // Режим при включении (последовательно)
+#define DEMO_MODE_RND 2           // Режим при включении (случайно)
                                   // 0 - последняя запущенная программа
                                   // 1 - демо режим с последовательным перебором эффектов
                                   // 2 - демо режим с случайным перебором эффектов
@@ -143,6 +153,8 @@
                                                                     
 #define LOG_ON        1           // Включить лог  1 - включить лог
 
+#define LED_NUM_SWITCH 1          // Переключатель размера ленты (0 - не используется, 1 - используется)
+#define DEMO_MODE_SWITCH 1        // Переключатель режима демо (0 - не используется, 1 - используется)
 
 /////////////////////////////////////////////////////////////////////////////////
 ///                               Настройка закончена
@@ -258,7 +270,7 @@ uint8_t ledMode = 0;                                            // номер т
     #endif
 #endif
 
-uint8_t demorun = DEMO_MODE;                                    // 0 = regular mode, 1 = demo mode, 2 = shuffle mode.
+uint8_t demorun = DEMO_MODE;                                   // 0 = regular mode, 1 = demo mode, 2 = shuffle mode.
 #define maxMode  122                                           // Maximum number of modes.
 
 uint8_t Protocol = 0;                                         // Temporary variables to save latest IR input
@@ -306,6 +318,7 @@ void bootme();
 void meshwait();
 void getirl();
 void demo_check();
+void update_demorun();
 
 // Display functions -----------------------------------------------------------------------
 
@@ -343,6 +356,14 @@ void setup() {
 
 #if KEY_ON == 1
   pinMode(PIN_KEY, INPUT);                                                        //Для аналоговых кнопок
+#endif
+
+#if LED_NUM_SWITCH == 1
+  pinMode(PIN_LED_NUM_SWITCH, INPUT);                                             //Для кнопки
+#endif
+
+#if DEMO_MODE_SWITCH == 1
+  pinMode(PIN_DEMO_MODE_SWITCH, INPUT);                                           //Для кнопки
 #endif
 
 #if LOG_ON == 1
@@ -413,8 +434,17 @@ void setup() {
       }
     #else
       ledMode = INITMODE;
-    #endif           
-    NUM_LEDS = KOL_LED;
+    #endif 
+
+    #if LED_NUM_SWITCH == 1
+      if(digitalRead(PIN_LED_NUM_SWITCH) == HIGH) // Установить размер ленты в соответствии с положением переключателя
+        NUM_LEDS = KOL_LED;
+      else
+        NUM_LEDS = KOL_LED_50;
+    #else
+      NUM_LEDS = KOL_LED;
+    #endif
+
     meshdelay = INITDEL;
  #endif
 
@@ -738,6 +768,9 @@ void demo_check(){
     if ((millis() - demo_time) >= (DEMO_TIME*1000L )) {           //Наступило время смены эффекта
       demo_time = millis();                                       //Запомним время 
       gCurrentPaletteNumber = random8(0,gGradientPaletteCount);   //Случайно поменяем палитру
+
+      update_demorun();   //Установим demorun в соответствии с положением переключателя (последовательно или случайно)
+
       #if CHANGE_ON == 1
         switch (demorun)  {
           case 2:   newMode = random8(0,maxMode);                 // демо 2
@@ -791,3 +824,14 @@ void demo_check(){
   } // if demorun
   
 } // demo_check()
+
+void update_demorun() {
+#if DEMO_MODE_SWITCH == 1
+  if(digitalRead(PIN_DEMO_MODE_SWITCH) == HIGH) // Установить режим демо в соответствии с положением переключателя
+    demorun = DEMO_MODE_RND;
+  else
+    demorun = DEMO_MODE;
+#else
+    demorun = DEMO_MODE;
+#endif
+}
